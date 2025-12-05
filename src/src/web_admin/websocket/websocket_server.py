@@ -157,7 +157,7 @@ WebSocket连接处理器"""
                 }))
                 
     except websockets.exceptions.ConnectionClosed:
-        logger.info(f"🔌 连接关闭: {client_id}")
+        logger.warning(f"⚠️ 客户端断开连接: {client_id} (正常行为,如页面刷新)")
     except Exception as e:
         logger.error(f"❌ 连接异常: {e}")
     finally:
@@ -190,7 +190,7 @@ async def main():
     print("=" * 60)
     print("🚀 WebSocket通知服务器")
     print("=" * 60)
-    print("📡 监听地址: ws://localhost:8006")
+    print("📡 监听地址: ws://localhost:8005")
     print("🔗 支持客户端:")
     print("   - conversation: 简小助系统")
     print("   - session_manager: 会话管理系统")
@@ -202,7 +202,7 @@ async def main():
     # 启动心跳检测任务
     asyncio.create_task(heartbeat())
     
-    async with websockets.serve(handler, "0.0.0.0", 8006):
+    async with websockets.serve(handler, "0.0.0.0", 8005):
         logger.info("✅ WebSocket服务器已启动")
         await asyncio.Future()  # 永久运行
 

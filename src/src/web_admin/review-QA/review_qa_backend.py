@@ -15,7 +15,7 @@ import sys
 import re
 import time
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import logging
 from duplicate_checker import DuplicateChecker
 
@@ -44,6 +44,9 @@ DIFY_BASE_URL = DIFY_CONFIG['api_base']
 # 知识库配置
 UNREVIEWED_DATASET_ID = "1397b9d1-8e25-4269-ba12-046059a425b6"  # 未审核知识库
 REVIEWED_DATASET_ID = "2df8ca5b-ac31-4dba-8b48-fc09f678b62d"    # 已审核知识库
+
+# 本地API配置
+LOCAL_QUERY_API_BASE = "http://192.168.1.138:49154/api/local/query"
 
 # 未审核知识库的文档配置
 UNREVIEWED_DOCUMENTS = {
@@ -241,6 +244,200 @@ def parse_qa_content(content: str):
     }
 
 
+def clean_qa_content(content: str) -> str:
+    """
+    清理和规范化QA内容
+    
+    清理规则（参考parse_qa_content的逻辑，但不调用它）：
+    1. 解析content提取各个字段（问、答、source、添加人员、分类）
+    2. 清理各个字段：去除多余空格、空行
+    3. 统一格式：统一使用中文冒号（问：、答：）
+    4. 重新格式化为标准格式
+    
+    Args:
+        content: 原始content字符串
+        
+    Returns:
+        清理后的content字符串
+    """
+    if not content:
+        return content
+    
+    lines = content.split('\n')
+    question = ""
+    answer = ""
+    source = ""
+    add_type = ""
+    classification = ""
+    
+    # 状态标记：当前正在收集哪个字段
+    collecting = None
+    
+    # 使用正则表达式查找"答:"或"答："来分割问题和答案（处理问和答在同一行的情况）
+    answer_match = re.search(r'答[：:]', content)
+    
+    if answer_match:
+        # 找到"答:"或"答："，分割问题和答案
+        question_part = content[:answer_match.start()].strip()
+        answer_part = content[answer_match.end():].strip()
+        
+        # 去除问题部分开头的"问:"或"问："
+        question_part = re.sub(r'^问[：:]\s*', '', question_part)
+        question = question_part.strip()
+        
+        # 处理答案部分，需要提取source、classification、add_type
+        answer_lines = answer_part.split('\n')
+        answer_content = []
+        
+        for line in answer_lines:
+            line_stripped = line.strip()
+            
+            # 检查是否包含元数据标签（可能在行内）
+            if '#source#' in line_stripped or 'source#' in line_stripped:
+                # 提取source
+                source_match = re.search(r'#?source#?[：:]\s*(.+)', line_stripped)
+                if source_match:
+                    source = source_match.group(1).strip()
+                # 如果source在行内，只取前面的部分作为答案
+                if '#source#' in line_stripped or 'source#' in line_stripped:
+                    before_source = re.split(r'#?source#?[：:]', line_stripped)[0].strip()
+                    if before_source:
+                        answer_content.append(before_source)
+                break
+            elif 'classification' in line_stripped.lower():
+                # 提取classification
+                class_match = re.search(r'classification[：:]\s*(.+)', line_stripped, re.IGNORECASE)
+                if class_match:
+                    classification = class_match.group(1).strip()
+                # 如果classification在行内，只取前面的部分
+                if 'classification' in line_stripped.lower():
+                    before_class = re.split(r'classification[：:]', line_stripped, flags=re.IGNORECASE)[0].strip()
+                    if before_class:
+                        answer_content.append(before_class)
+                break
+            elif '添加人员' in line_stripped:
+                # 提取add_type
+                add_match = re.search(r'添加人员[：:]\s*(.+)', line_stripped)
+                if add_match:
+                    add_type = add_match.group(1).strip()
+                # 如果add_type在行内，只取前面的部分
+                if '添加人员' in line_stripped:
+                    before_add = line_stripped.split('添加人员')[0].strip()
+                    if before_add:
+                        answer_content.append(before_add)
+                break
+            else:
+                answer_content.append(line_stripped)
+        
+        answer = '\n'.join(answer_content).strip()
+        
+        # 如果还没有提取到source、classification、add_type，继续从剩余内容中提取
+        remaining_content = '\n'.join(answer_lines[len(answer_content):])
+        for line in remaining_content.split('\n'):
+            line_stripped = line.strip()
+            if line_stripped.startswith('#source#:') or line_stripped.startswith('#source#：'):
+                if ':' in line_stripped:
+                    source = line_stripped.split(':', 1)[1].strip()
+                elif '：' in line_stripped:
+                    source = line_stripped.split('：', 1)[1].strip()
+            elif line_stripped.startswith('classification:') or line_stripped.startswith('classification：'):
+                if ':' in line_stripped:
+                    classification = line_stripped.split(':', 1)[1].strip()
+                elif '：' in line_stripped:
+                    classification = line_stripped.split('：', 1)[1].strip()
+            elif line_stripped.startswith('添加人员:') or line_stripped.startswith('添加人员：'):
+                if ':' in line_stripped:
+                    add_type = line_stripped.split(':', 1)[1].strip()
+                elif '：' in line_stripped:
+                    add_type = line_stripped.split('：', 1)[1].strip()
+    else:
+        # 回退到原始的行-by-line解析逻辑
+        for line in lines:
+            line_stripped = line.strip()
+            
+            # 检查是否是新的字段开始
+            if line_stripped.startswith('问:') or line_stripped.startswith('问：'):
+                question = line_stripped[2:].strip()
+                collecting = 'question' if not question else None
+            elif line_stripped.startswith('答:') or line_stripped.startswith('答：'):
+                answer = line_stripped[2:].strip()
+                collecting = 'answer'
+            elif line_stripped.startswith('#source#:') or line_stripped.startswith('#source#：'):
+                if ':' in line_stripped:
+                    source = line_stripped.split(':', 1)[1].strip()
+                elif '：' in line_stripped:
+                    source = line_stripped.split('：', 1)[1].strip()
+                collecting = None
+            elif line_stripped.startswith('classification:') or line_stripped.startswith('classification：'):
+                if ':' in line_stripped:
+                    classification = line_stripped.split(':', 1)[1].strip()
+                elif '：' in line_stripped:
+                    classification = line_stripped.split('：', 1)[1].strip()
+                collecting = None
+            elif line_stripped.startswith('添加人员:') or line_stripped.startswith('添加人员：'):
+                if ':' in line_stripped:
+                    add_type = line_stripped.split(':', 1)[1].strip()
+                elif '：' in line_stripped:
+                    add_type = line_stripped.split('：', 1)[1].strip()
+                collecting = None
+            elif line_stripped and collecting:
+                # 继续收集当前字段的内容
+                if collecting == 'question':
+                    question += ('\n' if question else '') + line_stripped
+                elif collecting == 'answer':
+                    answer += ('\n' if answer else '') + line_stripped
+    
+    # 清理各个字段
+    question = question.strip()
+    answer = answer.strip()
+    source = source.strip()
+    add_type = add_type.strip()
+    classification = classification.strip()
+    
+    # 清理问题：去除多余空格，但保留换行（如果有）
+    if question:
+        # 去除每行首尾空格，去除空行
+        question_lines = question.split('\n')
+        question = '\n'.join(line.strip() for line in question_lines if line.strip())
+        # 将多个连续空格替换为单个空格（但保留换行）
+        question = re.sub(r' +', ' ', question)
+    
+    # 清理答案：去除多余空行，但保留必要的换行
+    if answer:
+        # 去除连续的空行（超过2个换行符的替换为2个）
+        answer = re.sub(r'\n{3,}', '\n\n', answer)
+        # 去除每行首尾空格
+        answer_lines = answer.split('\n')
+        answer = '\n'.join(line.strip() for line in answer_lines if line.strip())
+    
+    # 清理source、add_type、classification：去除多余空格
+    source = ' '.join(source.split()) if source else ''
+    add_type = ' '.join(add_type.split()) if add_type else ''
+    classification = ' '.join(classification.split()) if classification else ''
+    
+    # 重新格式化为标准格式（统一使用中文冒号）
+    cleaned_parts = []
+    
+    if question:
+        cleaned_parts.append(f"问：{question}")
+    
+    if answer:
+        cleaned_parts.append(f"答：{answer}")
+    
+    if source:
+        cleaned_parts.append(f"#source#:{source}")
+    
+    if add_type:
+        cleaned_parts.append(f"添加人员:{add_type}")
+    
+    if classification:
+        cleaned_parts.append(f"分类:{classification}")
+    
+    cleaned_content = '\n'.join(cleaned_parts)
+    
+    return cleaned_content
+
+
 def format_qa_content(question: str, answer: str, source: str = "", add_type: str = "", classification: str = ""):
     """格式化问答对内容"""
     content = f"问:{question}\n答:{answer}"
@@ -292,35 +489,99 @@ def index():
 def get_unreviewed_segments():
     """获取未审核区域的所有分段"""
     try:
-        client = DifyAPIClient()
+        # 调用本地API获取数据
+        dataset_id = UNREVIEWED_DATASET_ID
+        api_url = f"{LOCAL_QUERY_API_BASE}?dataset_id={dataset_id}"
+        
+        logger.info(f"请求本地API: {api_url}")
+        response = requests.get(api_url, timeout=30)
+        
+        if response.status_code != 200:
+            logger.error(f"本地API请求失败: status_code={response.status_code}")
+            return jsonify({'success': False, 'error': f'本地API请求失败: {response.status_code}'}), 500
+        
+        api_data = response.json()
+        segments = api_data.get('data', [])
+        
+        if not segments:
+            logger.warning("本地API返回数据为空")
+            return jsonify({
+                'success': True,
+                'data': [],
+                'total': 0
+            })
+        
         all_segments = []
         
-        # 遍历所有未审核文档
-        for doc_id, doc_name in UNREVIEWED_DOCUMENTS.items():
-            result = client.get_all_segments(UNREVIEWED_DATASET_ID, doc_id)
+        # 遍历所有分段，进行数据转换和处理
+        for seg in segments:
+            # 1. 字段名转换：segment_id → id
+            if 'segment_id' in seg:
+                seg['id'] = seg.pop('segment_id')
+            elif 'id' not in seg:
+                logger.warning(f"分段缺少id字段: {seg}")
+                continue
             
-            if result['success']:
-                segments = result['data']
-                
-                # 为每个分段添加元数据
-                for seg in segments:
-                    seg['document_id'] = doc_id
-                    seg['document_name'] = doc_name
-                    
-                    # 解析QA内容
-                    content = seg.get('content', '')
-                    parsed = parse_qa_content(content)
-                    
-                    seg['question'] = parsed.get('question', '')
-                    seg['answer'] = parsed.get('answer', '')
-                    seg['add_method'] = determine_add_method(doc_id, parsed.get('add_type', ''))
-                    seg['add_source'] = determine_add_source(parsed.get('source', ''))
-                    seg['classification'] = parsed.get('classification', '')  # 添加分类字段
-                    
-                    all_segments.append(seg)
+            # 2. 时间格式转换：字符串(UTC) → 时间戳(东八区)
+            created_at_str = seg.get('created_at', '')
+            if isinstance(created_at_str, str):
+                try:
+                    # 解析为UTC时间
+                    dt_utc = datetime.strptime(created_at_str, '%Y-%m-%d %H:%M:%S')
+                    dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+                    # 转换为东八区时间（UTC+8）
+                    dt_cst = dt_utc.astimezone(timezone(timedelta(hours=8)))
+                    seg['created_at'] = int(dt_cst.timestamp())
+                except ValueError as e:
+                    logger.warning(f"时间格式解析失败: {created_at_str}, 错误: {e}")
+                    seg['created_at'] = 0
+            elif not isinstance(created_at_str, (int, float)):
+                seg['created_at'] = 0
+            
+            # 3. 处理 updated_at：如果没有则使用 created_at
+            updated_at = seg.get('updated_at')
+            if updated_at:
+                if isinstance(updated_at, str):
+                    try:
+                        # 解析为UTC时间
+                        dt_utc = datetime.strptime(updated_at, '%Y-%m-%d %H:%M:%S')
+                        dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+                        # 转换为东八区时间（UTC+8）
+                        dt_cst = dt_utc.astimezone(timezone(timedelta(hours=8)))
+                        seg['updated_at'] = int(dt_cst.timestamp())
+                    except ValueError:
+                        seg['updated_at'] = seg.get('created_at', 0)
+                elif not isinstance(updated_at, (int, float)):
+                    seg['updated_at'] = seg.get('created_at', 0)
+            else:
+                seg['updated_at'] = seg.get('created_at', 0)
+            
+            # 4. 获取 document_name（根据 document_id 查找）
+            doc_id = seg.get('document_id', '')
+            doc_name = UNREVIEWED_DOCUMENTS.get(doc_id, '未知文档')
+            seg['document_name'] = doc_name
+            
+            # 5. 保留原始 content 字段（用于后续解析）
+            content = seg.get('content', '')
+            
+            # 5.5. 清理content（规范化格式）
+            cleaned_content = clean_qa_content(content)
+            
+            # 6. 解析QA内容
+            parsed = parse_qa_content(cleaned_content)
+            
+            seg['question'] = parsed.get('question', '')
+            seg['answer'] = parsed.get('answer', '')
+            seg['add_method'] = determine_add_method(doc_id, parsed.get('add_type', ''))
+            seg['add_source'] = determine_add_source(parsed.get('source', ''))
+            seg['classification'] = parsed.get('classification', '')
+            
+            all_segments.append(seg)
         
-        # 按created_at降序排列
-        all_segments.sort(key=lambda x: x.get('created_at', 0), reverse=True)
+        # 按 updated_at 降序排列（优先使用 updated_at，如果没有则使用 created_at）
+        all_segments.sort(key=lambda x: x.get('updated_at', x.get('created_at', 0)), reverse=True)
+        
+        logger.info(f"成功获取 {len(all_segments)} 个未审核分段")
         
         return jsonify({
             'success': True,
@@ -328,8 +589,11 @@ def get_unreviewed_segments():
             'total': len(all_segments)
         })
         
+    except requests.exceptions.RequestException as e:
+        logger.error(f"本地API请求异常: {e}")
+        return jsonify({'success': False, 'error': f'本地API请求异常: {str(e)}'}), 500
     except Exception as e:
-        logger.error(f"获取未审核分段失败: {e}")
+        logger.error(f"获取未审核分段失败: {e}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
