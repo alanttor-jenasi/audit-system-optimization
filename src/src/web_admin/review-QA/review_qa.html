@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>简思问答对审核系统</title>
+    <link rel="icon" href="static/logo.png" type="image/png">
+    <link rel="stylesheet" href="static/review_qa.css">
+</head>
+<body>
+    <!-- 顶部导航 -->
+    <header class="header">
+        <div class="header-content">
+            <div class="title-section">
+                <img src="static/logo.png" alt="logo" class="logo-icon" id="logo-icon" title="返回首页">
+                <h1 class="title">简思问答对审核系统</h1>
+                <button class="theme-toggle-btn" id="theme-toggle-btn" title="切换主题">
+                    <span class="theme-icon">☀️</span>
+                </button>
+            </div>
+            <div class="stats-section">
+                <div class="today-stats" id="today-stats" title="点击查看月度统计">
+                    <span class="stats-label">今日审核:</span>
+                    <span class="stats-value" id="today-count">0</span>
+                    <span class="stats-unit">条</span>
+                </div>
+            </div>
+            <div class="nav-tabs">
+                <button class="nav-tab active" data-tab="unreviewed">
+                    未审核 <span id="unreviewed-count" class="count-badge">0</span>
+                </button>
+                <button class="nav-tab" data-tab="reviewed">
+                    已审核 <span id="reviewed-count" class="count-badge">0</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主内容区域 -->
+    <main class="main-content">
+        <!-- 未审核区域 -->
+        <div id="unreviewed-area" class="content-area active">
+            <div class="area-header">
+                <h2>📝 未审核列表</h2>
+            </div>
+            
+            <div id="unreviewed-list" class="qa-list">
+                <!-- 加载动画 -->
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>正在加载数据...</p>
+                </div>
+            </div>
+            
+            <!-- 分页控制 -->
+            <div id="unreviewed-pagination" class="pagination" style="display: none;">
+                <button class="pagination-btn" id="unreviewed-prev">上一页</button>
+                <span class="pagination-info" id="unreviewed-pagination-info">加载中...</span>
+                <button class="pagination-btn" id="unreviewed-next">下一页</button>
+                <div class="page-jump">
+                    <span>跳转到</span>
+                    <input type="number" id="unreviewed-page-input" class="page-input" min="1" placeholder="页码">
+                    <button class="pagination-btn" id="unreviewed-jump">跳转</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 已审核区域 -->
+        <div id="reviewed-area" class="content-area">
+            <!-- 文档选择界面 -->
+            <div id="document-selection" class="document-grid">
+                <div style="grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h2 style="text-align: center; flex: 1; margin: 0;">
+                        📚 选择文档分类
+                    </h2>
+                    <button class="btn btn-primary" id="check-duplicates-btn" style="margin-left: auto;">
+                        🔍 查重
+                    </button>
+                </div>
+                <!-- 文档卡片将由JS动态生成 -->
+            </div>
+            
+            <!-- 文档详情界面 -->
+            <div id="document-detail" style="display: none;">
+                <div class="area-header">
+                    <button class="back-btn" id="back-to-documents">← 返回文档列表</button>
+                    <h2 id="document-title">文档名称</h2>
+                </div>
+                
+                <div id="reviewed-list" class="qa-list">
+                    <!-- 加载动画 -->
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>正在加载数据...</p>
+                    </div>
+                </div>
+                
+                <!-- 分页控制 -->
+                <div id="reviewed-pagination" class="pagination" style="display: none;">
+                    <button class="pagination-btn" id="reviewed-prev">上一页</button>
+                    <span class="pagination-info" id="reviewed-pagination-info">加载中...</span>
+                    <button class="pagination-btn" id="reviewed-next">下一页</button>
+                    <div class="page-jump">
+                        <span>跳转到</span>
+                        <input type="number" id="reviewed-page-input" class="page-input" min="1" placeholder="页码">
+                        <button class="pagination-btn" id="reviewed-jump">跳转</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 文档选择弹窗 -->
+    <div id="document-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>选择目标文档</h3>
+                <button class="modal-close" onclick="closeDocumentModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="document-options" class="document-options">
+                    <!-- 文档选项将由JS动态生成 -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeDocumentModal()">取消</button>
+                <button class="btn btn-primary" id="confirm-document">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 确认删除弹窗 -->
+    <div id="confirm-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>确认删除</h3>
+                <button class="modal-close" onclick="closeConfirmModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="text-align: center; font-size: 16px; color: #dc2626;">
+                    ⚠️ 确定要删除这个QA吗？此操作不可恢复！
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeConfirmModal()">取消</button>
+                <button class="btn btn-danger" id="confirm-delete">确定删除</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 月度统计弹窗 -->
+    <div id="monthly-stats-modal" class="modal">
+        <div class="modal-content monthly-modal">
+            <div class="modal-header">
+                <h3>📅 月度审核统计</h3>
+                <button class="modal-close" onclick="closeMonthlyStatsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="month-selector">
+                    <button class="month-nav-btn" id="prev-month">&lt;</button>
+                    <span class="current-month" id="current-month">2025年 12月</span>
+                    <button class="month-nav-btn" id="next-month">&gt;</button>
+                </div>
+                <div class="calendar-grid" id="calendar-grid">
+                    <!-- 日历将由JS生成 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 刷新确认弹窗 -->
+    <div id="refresh-confirm-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>⚠️ 确认刷新</h3>
+            </div>
+            <div class="modal-body">
+                <p style="text-align: center; font-size: 16px; color: #f59e0b; line-height: 1.8;">
+                    刷新后仅回到首页，<br>
+                    获取最新数据请执行浏览器强制刷新：Ctrl+Shift+R<br><br>
+                    <strong>确定要继续吗？</strong>
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancel-refresh">取消</button>
+                <button class="btn btn-primary" id="confirm-refresh">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 查重结果弹窗 -->
+    <div id="duplicate-modal" class="modal">
+        <div class="modal-content duplicate-modal">
+            <div class="modal-header">
+                <h3>🔍 查重结果</h3>
+                <button class="modal-close" onclick="closeDuplicateModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="duplicate-controls">
+                    <label>
+                        相似度阈值: 
+                        <input type="range" id="similarity-slider" min="50" max="100" value="80" step="1">
+                        <span id="similarity-value">80%</span>
+                    </label>
+                    <button class="btn btn-primary" id="recheck-btn">重新查重</button>
+                </div>
+                <div id="duplicate-results">
+                    <!-- 查重结果将由JS生成 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast提示 -->
+    <div id="toast" class="toast"></div>
+
+    <script src="static/review_qa.js"></script>
+</body>
+</html>
