@@ -34,7 +34,18 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__, 
             template_folder='.',
             static_folder='static')
-CORS(app)
+
+# 配置CORS支持跨域访问
+CORS(app, resources={
+    r"/api/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "expose_headers": ["Content-Type"],
+        "supports_credentials": False,
+        "max_age": 3600
+    }
+})
 
 # Dify配置
 DIFY_CONFIG = BASE_CONFIG['dify']
