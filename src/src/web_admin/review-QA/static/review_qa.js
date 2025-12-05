@@ -694,6 +694,60 @@ function closeDocumentModal() {
     state.selectedDocument = null;
 }
 
+// 通用自定义模态框
+let customModalCallback = null;
+
+function showCustomModal(title, content, onConfirm) {
+    customModalCallback = onConfirm;
+    
+    // 创建模态框
+    let modal = document.getElementById('custom-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'custom-modal';
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 600px;">
+                <div class="modal-header">
+                    <h3 id="custom-modal-title"></h3>
+                    <button class="modal-close" onclick="closeCustomModal()">&times;</button>
+                </div>
+                <div class="modal-body" id="custom-modal-body"></div>
+                <div class="modal-footer" style="display: flex; gap: 12px; justify-content: flex-end; padding: 16px 24px; border-top: 1px solid var(--border-color);">
+                    <button class="btn btn-secondary" onclick="closeCustomModal()">取消</button>
+                    <button class="btn btn-primary" onclick="confirmCustomModal()">确认</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        
+        // 点击背景关闭
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                closeCustomModal();
+            }
+        });
+    }
+    
+    document.getElementById('custom-modal-title').textContent = title;
+    document.getElementById('custom-modal-body').innerHTML = content;
+    modal.classList.add('active');
+}
+
+function closeCustomModal() {
+    const modal = document.getElementById('custom-modal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+    customModalCallback = null;
+}
+
+async function confirmCustomModal() {
+    if (customModalCallback) {
+        await customModalCallback();
+    }
+}
+
 async function confirmDocumentSelection() {
     if (!state.selectedDocument) {
         showToast('请选择目标文档', 'warning');
@@ -1397,6 +1451,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const recheckBtn = document.getElementById('recheck-btn');
     if (recheckBtn) {
         recheckBtn.addEventListener('click', () => {
+            // 显示加载反馈
+            const resultsContainer = document.getElementById('duplicate-results');
+            resultsContainer.innerHTML = `
+                <div class="loading" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px;">
+                    <div class="spinner" style="width: 40px; height: 40px; border: 4px solid var(--border-color); border-top-color: var(--primary-color); border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                    <p style="margin-top: 16px; font-size: 16px; font-weight: 600; color: var(--primary-color);">正在重新查重...</p>
+                </div>
+            `;
+            
             const threshold = parseInt(document.getElementById('similarity-slider').value) / 100;
             performDuplicateCheck(threshold);
         });
@@ -1415,7 +1478,7 @@ async function handleCheckDuplicates() {
         <div class="loading" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px;">
             <img src="static/logo.png" alt="logo" style="width: 80px; height: 80px; animation: float 3s ease-in-out infinite;">
             <p style="margin-top: 24px; font-size: 18px; font-weight: 600; color: var(--primary-color);">正在查重中...</p>
-            <p style="margin-top: 8px; font-size: 14px; color: var(--text-secondary);">请耐心等待，预计需要1-2分钟</p>
+            <p style="margin-top: 8px; font-size: 14px; color: var(--text-secondary);">请耐心等待...</p>
         </div>
     `;
     
@@ -1466,7 +1529,7 @@ function renderDuplicateResults(data) {
     
     data.groups.forEach(group => {
         html += `
-            <div class="duplicate-group" data-group-id="${group.group_id}" data-initial-count="${group.count}">
+            <div class="duplicate-group">
                 <div class="duplicate-group-header">
                     <div class="duplicate-group-title">
                         重复组 #${group.group_id} (共${group.count}条) - 平均相似度: ${group.similarity}%
@@ -1487,7 +1550,7 @@ function renderDuplicateResults(data) {
                                     <button class="btn btn-secondary btn-sm" onclick="editDuplicateItem('${item.segment_id}', '${item.document_id}')">
                                         ✏️ 编辑
                                     </button>
-                                    <button class="btn btn-danger btn-sm" onclick="confirmDeleteDuplicateItem('${item.segment_id}', '${item.document_id}', ${group.group_id}, ${group.count})">
+                                    <button class="btn btn-danger btn-sm" onclick="confirmDeleteDuplicateItem('${item.segment_id}', '${item.document_id}')">
                                         🗑️ 删除
                                     </button>
                                 </div>
@@ -1733,24 +1796,100 @@ function updateThemeIcon(theme) {
 // ==================== 查重功能增强 ====================
 
 // 编辑重复项
-function editDuplicateItem(segmentId, documentId) {
-    // 关闭查重模态框
-    closeDuplicateModal();
-    
-    // 切换到已审核区域
-    switchTab('reviewed');
-    
-    // 等待列表加载后查找并高亮该分段
-    setTimeout(() => {
-        const card = document.querySelector(`[data-segment-id="${segmentId}"]`);
-        if (card) {
-            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            card.style.border = '3px solid var(--warning-color)';
-            setTimeout(() => {
-                card.style.border = '';
-            }, 3000);
+async function editDuplicateItem(segmentId, documentId) {
+    try {
+        // 获取当前分段数据
+        const response = await fetch(`${API_BASE}/api/reviewed/segment/${segmentId}`);
+        const result = await response.json();
+        
+        if (!result.success) {
+            showToast('获取分段数据失败', 'error');
+            return;
         }
-    }, 500);
+        
+        const segment = result.data;
+        
+        // 解析QA内容
+        const content = segment.content || '';
+        const lines = content.split('\n');
+        let question = '';
+        let answer = '';
+        
+        for (const line of lines) {
+            if (line.startsWith('问:')) {
+                question = line.substring(2).trim();
+            } else if (line.startsWith('答:')) {
+                answer = line.substring(2).trim();
+            }
+        }
+        
+        // 显示编辑模态框
+        const editContent = `
+            <div style="padding: 20px;">
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; font-weight: 600; margin-bottom: 8px; color: var(--text-primary);">问题：</label>
+                    <textarea id="edit-question" rows="3" style="width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; resize: vertical;">${question}</textarea>
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; font-weight: 600; margin-bottom: 8px; color: var(--text-primary);">答案：</label>
+                    <textarea id="edit-answer" rows="6" style="width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; resize: vertical;">${answer}</textarea>
+                </div>
+            </div>
+        `;
+        
+        showCustomModal('编辑QA', editContent, async () => {
+            const newQuestion = document.getElementById('edit-question').value.trim();
+            const newAnswer = document.getElementById('edit-answer').value.trim();
+            
+            if (!newQuestion || !newAnswer) {
+                showToast('问题和答案不能为空', 'error');
+                return;
+            }
+            
+            await updateDuplicateSegment(segmentId, documentId, newQuestion, newAnswer);
+        });
+        
+    } catch (error) {
+        console.error('✖ 编辑失败:', error);
+        showToast('编辑失败', 'error');
+    }
+}
+
+// 更新分段内容
+async function updateDuplicateSegment(segmentId, documentId, question, answer) {
+    try {
+        showToast('正在保存...', 'info');
+        
+        const response = await fetch(`${API_BASE}/api/reviewed/segments/${segmentId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                document_id: documentId,
+                question: question,
+                answer: answer
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast('保存成功，正在重新查重...', 'success');
+            
+            // 关闭所有模态框
+            closeCustomModal();
+            closeDuplicateModal();
+            
+            // 等待一下然后重新查重
+            setTimeout(() => {
+                handleCheckDuplicates();
+            }, 500);
+        } else {
+            showToast('保存失败: ' + result.error, 'error');
+        }
+    } catch (error) {
+        console.error('✖ 保存失败:', error);
+        showToast('网络错误，请稍后重试', 'error');
+    }
 }
 
 // 确认删除重复项(使用自定义确认框)
@@ -1767,15 +1906,14 @@ function confirmDeleteDuplicateItem(segmentId, documentId, groupId, groupCount) 
         </div>
     `;
     
-    showDocumentModal('删除确认', content, () => {
-        deleteDuplicateItem(segmentId, documentId, groupId, groupCount);
+    showCustomModal('删除确认', content, () => {
+        deleteDuplicateItem(segmentId, documentId);
     });
 }
 
 // 删除重复项
-async function deleteDuplicateItem(segmentId, documentId, groupId, groupCount) {
+async function deleteDuplicateItem(segmentId, documentId) {
     try {
-        // 显示简单的等待UI
         showToast('正在删除...', 'info');
         
         const response = await fetch(`${API_BASE}/api/reviewed/segments/${segmentId}`, {
@@ -1787,41 +1925,15 @@ async function deleteDuplicateItem(segmentId, documentId, groupId, groupCount) {
         const result = await response.json();
         
         if (result.success) {
-            showToast('删除成功', 'success');
+            showToast('删除成功，正在重新查重...', 'success');
             
-            // 立即移除该分段
-            const itemElement = document.querySelector(`[data-segment-id="${segmentId}"]`);
-            if (itemElement) {
-                itemElement.remove();
-            }
+            // 关闭确认框
+            closeCustomModal();
             
-            // 检查重复组是否需要移除
-            const groupElement = document.querySelector(`[data-group-id="${groupId}"]`);
-            if (groupElement) {
-                const remainingItems = groupElement.querySelectorAll('.duplicate-item');
-                
-                // 如果初始是2个,删除后只剩1个,移除整个组
-                const initialCount = parseInt(groupElement.dataset.initialCount);
-                if (initialCount === 2 && remainingItems.length === 1) {
-                    groupElement.remove();
-                    showToast('该重复组已移除', 'info');
-                } else if (remainingItems.length > 0) {
-                    // 更新组内序号
-                    remainingItems.forEach((item, index) => {
-                        const numberEl = item.querySelector('.duplicate-item-number');
-                        if (numberEl) {
-                            numberEl.textContent = index + 1;
-                        }
-                    });
-                    
-                    // 更新组标题
-                    const titleEl = groupElement.querySelector('.duplicate-group-title');
-                    if (titleEl) {
-                        const currentText = titleEl.textContent;
-                        titleEl.textContent = currentText.replace(/共\d+条/, `共${remainingItems.length}条`);
-                    }
-                }
-            }
+            // 等待一下然后重新查重
+            setTimeout(() => {
+                handleCheckDuplicates();
+            }, 500);
         } else {
             showToast('删除失败: ' + result.error, 'error');
         }

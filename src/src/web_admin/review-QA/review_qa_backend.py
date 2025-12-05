@@ -241,7 +241,7 @@ def parse_qa_content(content: str):
     }
 
 
-def format_qa_content(question: str, answer: str, source: str = "", add_type: str = ""):
+def format_qa_content(question: str, answer: str, source: str = "", add_type: str = "", classification: str = ""):
     """格式化问答对内容"""
     content = f"问:{question}\n答:{answer}"
     
@@ -250,6 +250,9 @@ def format_qa_content(question: str, answer: str, source: str = "", add_type: st
     
     if add_type:
         content += f"\n添加人员:{add_type}"
+    
+    if classification:
+        content += f"\n分类:{classification}"
     
     return content
 
@@ -483,6 +486,87 @@ def delete_segment():
         logger.error(f"删除分段失败: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+@app.route('/api/reviewed/segment/<segment_id>', methods=['GET'])
+def get_reviewed_segment_by_id(segment_id):
+    """获取单个已审核分段(RESTful风格)"""
+    try:
+        # 需要遍历所有文档查找该分段
+        client = DifyAPIClient()
+        
+        for doc_id, doc_name in REVIEWED_DOCUMENTS.items():
+            result = client.get_segment(REVIEWED_DATASET_ID, doc_id, segment_id)
+            if result['success']:
+                return jsonify(result)
+        
+        return jsonify({'success': False, 'error': '分段不存在'}), 404
+        
+    except Exception as e:
+        logger.error(f"获取分段失败: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/reviewed/segments/<segment_id>', methods=['PUT'])
+def update_reviewed_segment(segment_id):
+    """更新已审核分段内容(RESTful风格)"""
+    try:
+        data = request.json
+        document_id = data.get('document_id')
+        question = data.get('question', '').strip()
+        answer = data.get('answer', '').strip()
+        
+        if not all([document_id, question, answer]):
+            return jsonify({'success': False, 'error': '缺少必要参数'}), 400
+        
+        # 获取原分段以保留元数据
+        client = DifyAPIClient()
+        result = client.get_segment(REVIEWED_DATASET_ID, document_id, segment_id)
+        
+        if not result['success']:
+            return jsonify(result), 500
+        
+        original_segment = result['data']
+        
+        # 解析原内容以保留元数据
+        original_content = original_segment.get('content', '')
+        parsed = parse_qa_content(original_content)
+        
+        # 构造新内容
+        new_content = format_qa_content(
+            question, 
+            answer,
+            parsed.get('source', ''),
+            parsed.get('add_type', ''),
+            parsed.get('classification', '')
+        )
+        
+        # 更新分段
+        keywords = [question[:50]] if len(question) > 0 else []
+        result = client.update_segment(REVIEWED_DATASET_ID, document_id, segment_id, new_content, keywords)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"更新分段失败: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/reviewed/segments/<segment_id>', methods=['DELETE'])
+def delete_reviewed_segment(segment_id):
+    """删除已审核分段(RESTful风格)"""
+    try:
+        data = request.json
+        document_id = data.get('document_id')
+        
+        if not document_id:
+            return jsonify({'success': False, 'error': '缺少document_id参数'}), 400
+        
+        client = DifyAPIClient()
+        result = client.delete_segment(REVIEWED_DATASET_ID, document_id, segment_id)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"删除分段失败: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/segment/approve', methods=['POST'])
 def approve_segment():
@@ -799,5 +883,5 @@ if __name__ == '__main__':
     # 初始化统计数据库
     init_stats_db()
     
-    logger.info("🌐 服务器启动中... [http://0.0.0.0:5003]")
-    app.run(host='0.0.0.0', port=5003, debug=True)
+    logger.info("🌐 服务器启动中... [http://0.0.0.0:5002]")
+    app.run(host='0.0.0.0', port=5002, debug=True)
