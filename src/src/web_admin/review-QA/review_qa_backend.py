@@ -255,24 +255,34 @@ def parse_qa_content(content: str):
     }
 
 
-def clean_qa_content(content: str) -> str:
+def clean_qa_content(content: str, document_id: str = "") -> dict:
     """
-    清理和规范化QA内容
+    清理和规范化QA内容，返回解析后的字典
     
-    清理规则（参考parse_qa_content的逻辑，但不调用它）：
-    1. 解析content提取各个字段（问、答、source、添加人员、分类）
+    清理规则：
+    1. 解析content提取各个字段（问、答、source、添加来源、分类）
     2. 清理各个字段：去除多余空格、空行
     3. 统一格式：统一使用中文冒号（问：、答：）
-    4. 重新格式化为标准格式
+    4. 根据document_id和add_type确定添加方式
     
     Args:
         content: 原始content字符串
+        document_id: 文档ID，用于确定添加方式
         
     Returns:
-        清理后的content字符串
+        包含清理后字段的字典：{
+            'question': str,
+            'answer': str,
+            'source': str,
+            'add_type': str,
+            'classification': str,
+            'add_method': str,
+            'cleaned_content': str  # 可选：清理后的完整字符串
+        }
     """
     if not content:
         return content
+
     
     lines = content.split('\n')
     question = ""
@@ -303,42 +313,35 @@ def clean_qa_content(content: str) -> str:
         for line in answer_lines:
             line_stripped = line.strip()
             
-            # 检查是否包含元数据标签（可能在行内）
-            if '#source#' in line_stripped or 'source#' in line_stripped:
-                # 提取source
-                source_match = re.search(r'#?source#?[：:]\s*(.+)', line_stripped)
-                if source_match:
-                    source = source_match.group(1).strip()
-                # 如果source在行内，只取前面的部分作为答案
-                if '#source#' in line_stripped or 'source#' in line_stripped:
-                    before_source = re.split(r'#?source#?[：:]', line_stripped)[0].strip()
-                    if before_source:
-                        answer_content.append(before_source)
-                break
-            elif 'classification' in line_stripped.lower():
-                # 提取classification
-                class_match = re.search(r'classification[：:]\s*(.+)', line_stripped, re.IGNORECASE)
-                if class_match:
-                    classification = class_match.group(1).strip()
-                # 如果classification在行内，只取前面的部分
-                if 'classification' in line_stripped.lower():
-                    before_class = re.split(r'classification[：:]', line_stripped, flags=re.IGNORECASE)[0].strip()
-                    if before_class:
-                        answer_content.append(before_class)
-                break
-            elif '添加人员' in line_stripped:
-                # 提取add_type
-                add_match = re.search(r'添加人员[：:]\s*(.+)', line_stripped)
-                if add_match:
-                    add_type = add_match.group(1).strip()
-                # 如果add_type在行内，只取前面的部分
-                if '添加人员' in line_stripped:
-                    before_add = line_stripped.split('添加人员')[0].strip()
-                    if before_add:
-                        answer_content.append(before_add)
-                break
-            else:
-                answer_content.append(line_stripped)
+            # 使用正则表达式一次性提取所有元数据标签（不break，继续处理所有标签）
+            # 提取 classification（支持英文和中文）
+            class_match = re.search(r'(?:classification|分类)[：:]\s*([^#添加]+?)(?:\s*#|$|添加)', line_stripped, re.IGNORECASE)
+            if class_match:
+                classification = class_match.group(1).strip()
+            
+            # 提取 source
+            source_match = re.search(r'#?source#?[：:]\s*([^添加]+?)(?:添加|$)', line_stripped)
+            if source_match:
+                source = source_match.group(1).strip()
+            
+            # 提取 添加人员
+            add_match = re.search(r'添加人员[：:]\s*(.+)', line_stripped)
+            if add_match:
+                add_type = add_match.group(1).strip()
+            
+            # 从行中移除所有元数据标签，保留答案内容
+            answer_text = line_stripped
+            # 移除 classification（支持英文和中文）
+            answer_text = re.sub(r'(?:classification|分类)[：:]\s*[^#添加]+', '', answer_text, flags=re.IGNORECASE)
+            # 移除 #source#
+            answer_text = re.sub(r'#?source#?[：:]\s*[^添加]+', '', answer_text)
+            # 移除 添加人员
+            answer_text = re.sub(r'添加人员[：:]\s*.+', '', answer_text)
+            answer_text = answer_text.strip()
+            
+            # 如果还有答案内容，添加到答案列表
+            if answer_text:
+                answer_content.append(answer_text)
         
         answer = '\n'.join(answer_content).strip()
         
@@ -351,12 +354,14 @@ def clean_qa_content(content: str) -> str:
                     source = line_stripped.split(':', 1)[1].strip()
                 elif '：' in line_stripped:
                     source = line_stripped.split('：', 1)[1].strip()
-            elif line_stripped.startswith('classification:') or line_stripped.startswith('classification：'):
+            elif line_stripped.startswith('classification:') or line_stripped.startswith('classification：') or \
+                 line_stripped.startswith('分类:') or line_stripped.startswith('分类：'):
+                # 支持英文和中文的分类字段
                 if ':' in line_stripped:
                     classification = line_stripped.split(':', 1)[1].strip()
                 elif '：' in line_stripped:
                     classification = line_stripped.split('：', 1)[1].strip()
-            elif line_stripped.startswith('添加人员:') or line_stripped.startswith('添加人员：'):
+            elif line_stripped.startswith('添加来源:') or line_stripped.startswith('添加来源：'):
                 if ':' in line_stripped:
                     add_type = line_stripped.split(':', 1)[1].strip()
                 elif '：' in line_stripped:
@@ -379,7 +384,9 @@ def clean_qa_content(content: str) -> str:
                 elif '：' in line_stripped:
                     source = line_stripped.split('：', 1)[1].strip()
                 collecting = None
-            elif line_stripped.startswith('classification:') or line_stripped.startswith('classification：'):
+            elif line_stripped.startswith('classification:') or line_stripped.startswith('classification：') or \
+                 line_stripped.startswith('分类:') or line_stripped.startswith('分类：'):
+                # 支持英文和中文的分类字段
                 if ':' in line_stripped:
                     classification = line_stripped.split(':', 1)[1].strip()
                 elif '：' in line_stripped:
@@ -423,30 +430,26 @@ def clean_qa_content(content: str) -> str:
     
     # 清理source、add_type、classification：去除多余空格
     source = ' '.join(source.split()) if source else ''
+    # 确保source不包含"添加人员"的内容
+    if source and '添加人员' in source:
+        source = source.split('添加人员')[0].strip()
     add_type = ' '.join(add_type.split()) if add_type else ''
     classification = ' '.join(classification.split()) if classification else ''
     
-    # 重新格式化为标准格式（统一使用中文冒号）
-    cleaned_parts = []
+    # 调用determine_add_method确定添加方式
+    add_method = ""
+    if document_id:
+        add_method = determine_add_method(document_id, add_type)
     
-    if question:
-        cleaned_parts.append(f"问：{question}")
-    
-    if answer:
-        cleaned_parts.append(f"答：{answer}")
-    
-    if source:
-        cleaned_parts.append(f"#source#:{source}")
-    
-    if add_type:
-        cleaned_parts.append(f"添加人员:{add_type}")
-    
-    if classification:
-        cleaned_parts.append(f"分类:{classification}")
-    
-    cleaned_content = '\n'.join(cleaned_parts)
-    
-    return cleaned_content
+    # 返回字典而不是字符串
+    return {
+        'question': question,
+        'answer': answer,
+        'source': source,
+        'add_type': add_type,
+        'classification': classification,
+        'add_method': add_method
+    }
 
 
 def format_qa_content(question: str, answer: str, source: str = "", add_type: str = "", classification: str = ""):
@@ -575,15 +578,14 @@ def get_unreviewed_segments():
             # 5. 保留原始 content 字段（用于后续解析）
             content = seg.get('content', '')
             
-            # 5.5. 清理content（规范化格式）
-            cleaned_content = clean_qa_content(content)
+            # 5.5. 清理content（规范化格式）并解析
+            parsed = clean_qa_content(content, document_id=doc_id)
             
-            # 6. 解析QA内容
-            parsed = parse_qa_content(cleaned_content)
-            
+            # 6. 使用解析后的字段
             seg['question'] = parsed.get('question', '')
             seg['answer'] = parsed.get('answer', '')
-            seg['add_method'] = determine_add_method(doc_id, parsed.get('add_type', ''))
+            # 直接使用clean_qa_content返回的add_method
+            seg['add_method'] = parsed.get('add_method', '') or determine_add_method(doc_id, parsed.get('add_type', ''))
             seg['add_source'] = determine_add_source(parsed.get('source', ''))
             seg['classification'] = parsed.get('classification', '')
             
