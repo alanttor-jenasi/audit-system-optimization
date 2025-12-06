@@ -952,6 +952,9 @@ def init_stats_db():
     conn.close()
     logger.info("✅ 审核统计数据库初始化完成 [db_path=%s]", STATS_DB)
 
+# 模块加载时自动初始化数据库，确保表存在
+init_stats_db()
+
 def record_approval():
     """记录一次审核"""
     import sqlite3
@@ -1169,8 +1172,5 @@ if __name__ == '__main__':
     logger.info("✨ 使用单个分段查询API，数据实时同步")
     logger.info("="*60)
     
-    # 初始化统计数据库
-    init_stats_db()
-    
-    logger.info("🌐 服务器启动中... [http://0.0.0.0:5002]")
-    app.run(host='0.0.0.0', port=5002, debug=True)
+    logger.info("🌐 服务器启动中... [http://0.0.0.0:5003]")
+    app.run(host='0.0.0.0', port=5003, debug=True)
