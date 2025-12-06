@@ -922,7 +922,7 @@ def approve_segment():
 # 使用绝对路径，更可靠（不受工作目录影响）
 _current_file = Path(__file__).resolve()
 # 从 src/src/web_admin/review-QA/review_qa_backend.py 回到 src/src/
-STATS_DB = _current_file.parent.parent.parent / 'resource' / 'data' / 'approval_stats.db'
+STATS_DB = _current_file.parent.parent.parent.parent / 'resource' / 'data' / 'approval_stats.db'
 print('STATS_DB', STATS_DB)
 def init_stats_db():
     """初始化统计数据库"""
