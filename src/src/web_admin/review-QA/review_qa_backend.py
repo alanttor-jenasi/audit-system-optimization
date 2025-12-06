@@ -923,13 +923,18 @@ def approve_segment():
 _current_file = Path(__file__).resolve()
 # 从 src/src/web_admin/review-QA/review_qa_backend.py 回到 src/src/
 STATS_DB = _current_file.parent.parent.parent.parent / 'resource' / 'data' / 'approval_stats.db'
-print('STATS_DB', STATS_DB)
+
+
+def ensure_stats_db_dir():
+    """确保数据库目录存在（跨平台兼容）"""
+    STATS_DB.parent.mkdir(parents=True, exist_ok=True)
+
 def init_stats_db():
     """初始化统计数据库"""
     import sqlite3
     
     # 确保目录存在
-    STATS_DB.parent.mkdir(parents=True, exist_ok=True)
+    ensure_stats_db_dir()
     
     conn = sqlite3.connect(str(STATS_DB))
     cursor = conn.cursor()
@@ -954,6 +959,9 @@ def record_approval():
     
     today = date.today().isoformat()
     
+    # 确保目录存在
+    ensure_stats_db_dir()
+    
     conn = sqlite3.connect(str(STATS_DB))
     cursor = conn.cursor()
     
@@ -975,6 +983,9 @@ def get_today_stats():
         from datetime import date
         
         today = date.today().isoformat()
+        
+        # 确保目录存在（跨平台兼容）
+        ensure_stats_db_dir()
         
         conn = sqlite3.connect(str(STATS_DB))
         cursor = conn.cursor()
@@ -1012,6 +1023,9 @@ def get_monthly_stats():
             end_date = f"{year + 1}-01-01"
         else:
             end_date = f"{year}-{month + 1:02d}-01"
+        
+        # 确保目录存在（跨平台兼容）
+        ensure_stats_db_dir()
         
         conn = sqlite3.connect(str(STATS_DB))
         cursor = conn.cursor()
