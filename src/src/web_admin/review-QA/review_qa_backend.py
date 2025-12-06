@@ -919,13 +919,11 @@ def approve_segment():
 
 
 # 审核统计数据库 - 统一存放在resource/data文件夹
-# __file__: src/web_admin/review-QA/review_qa_backend.py
-# parent: src/web_admin/review-QA/
-# parent.parent: src/web_admin/
-# parent.parent.parent: src/
-# parent.parent.parent.parent: 项目根目录
-STATS_DB = Path(__file__).parent.parent.parent.parent / 'resource' / 'data' / 'approval_stats.db'
-
+# 使用绝对路径，更可靠（不受工作目录影响）
+_current_file = Path(__file__).resolve()
+# 从 src/src/web_admin/review-QA/review_qa_backend.py 回到 src/src/
+STATS_DB = _current_file.parent.parent.parent / 'resource' / 'data' / 'approval_stats.db'
+print('STATS_DB', STATS_DB)
 def init_stats_db():
     """初始化统计数据库"""
     import sqlite3
